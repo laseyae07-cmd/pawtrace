@@ -3,7 +3,6 @@ import { useMemo, useState } from 'react'
 import {
   ArrowDownRight,
   ArrowRight,
-  Bell,
   ChevronDown,
   Crosshair,
   Heart,
@@ -26,6 +25,7 @@ type Pet = {
   status: 'Lost' | 'Found'
   color: string
   image: string
+  description: string
 }
 
 const pets: Pet[] = [
@@ -40,6 +40,7 @@ const pets: Pet[] = [
     color: 'Brown & white',
     image:
       'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=900&q=85',
+    description: 'Friendly mixed-breed dog last seen near the central market with a brown and white coat.',
   },
   {
     id: 2,
@@ -52,6 +53,7 @@ const pets: Pet[] = [
     color: 'Ginger',
     image:
       'https://images.unsplash.com/photo-1573865526739-10659fec78a5?auto=format&fit=crop&w=900&q=85',
+    description: 'Ginger cat found in a quiet residential lane and waiting for the owner to be contacted.',
   },
   {
     id: 3,
@@ -64,6 +66,7 @@ const pets: Pet[] = [
     color: 'Golden',
     image:
       'https://images.unsplash.com/photo-1633722715463-d30f4f325e24?auto=format&fit=crop&w=900&q=85',
+    description: 'Golden retriever wearing a blue collar, last spotted near the university area after sunset.',
   },
   {
     id: 4,
@@ -76,6 +79,7 @@ const pets: Pet[] = [
     color: 'Grey',
     image:
       'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=900&q=85',
+    description: 'Grey domestic shorthair cat was found near a roadside shop and is being monitored by a local caretaker.',
   },
 ]
 
