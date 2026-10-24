@@ -1,4 +1,6 @@
+
 import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
 import {
   ArrowDownRight,
   ArrowRight,
@@ -50,7 +52,16 @@ type ReportForm = {
   description: string
 }
 
-const API_URL = 'http://localhost:5000/api/reports'
+const API_BASE_URL = 'http://localhost:5000'
+const API_URL = `${API_BASE_URL}/api/reports`
+const PHOTO_UPLOAD_URL = `${API_URL}/with-photo`
+const MAX_PHOTO_SIZE = 5 * 1024 * 1024
+
+const ALLOWED_IMAGE_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]
 
 const dogImage =
   'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=900&q=85'
@@ -69,6 +80,14 @@ const initialForm: ReportForm = {
 }
 
 function formatReport(report: DatabaseReport): Pet {
+  const image = report.image_url
+    ? report.image_url.startsWith('http')
+      ? report.image_url
+      : `${API_BASE_URL}${report.image_url.startsWith('/') ? '' : '/'}${report.image_url}`
+    : report.animal_type === 'Cat'
+      ? catImage
+      : dogImage
+
   return {
     id: Number(report.id),
     name: report.name,
@@ -78,9 +97,7 @@ function formatReport(report: DatabaseReport): Pet {
     date: new Date(report.created_at).toLocaleDateString(),
     status: report.status,
     color: report.color ?? '',
-    image:
-      report.image_url ||
-      (report.animal_type === 'Cat' ? catImage : dogImage),
+    image,
     description: report.description,
   }
 }
@@ -99,6 +116,8 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const [form, setForm] = useState<ReportForm>({ ...initialForm })
+  const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null)
+  const [photoPreview, setPhotoPreview] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -138,6 +157,15 @@ function App() {
     }
   }, [])
 
+  // Clean up the previous preview URL when it changes.
+  useEffect(() => {
+    return () => {
+      if (photoPreview) {
+        URL.revokeObjectURL(photoPreview)
+      }
+    }
+  }, [photoPreview])
+
   const filteredPets = useMemo(() => {
     const searchTerm = query.trim().toLowerCase()
 
@@ -168,10 +196,7 @@ function App() {
     field: K,
     value: ReportForm[K]
   ) {
-    setForm((previous) => ({
-      ...previous,
-      [field]: value,
-    }))
+    setForm((previous) => ({ ...previous, [field]: value }))
   }
 
   function toggleSaved(id: number) {
@@ -182,8 +207,36 @@ function App() {
     )
   }
 
+  function handlePhotoChange(file: File | undefined) {
+    setApiError('')
+    setFormSuccess(false)
+
+    if (!file) {
+      setSelectedPhoto(null)
+      setPhotoPreview('')
+      return
+    }
+
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      setSelectedPhoto(null)
+      setPhotoPreview('')
+      setApiError('Choose a JPG, PNG, or WebP image.')
+      return
+    }
+
+    if (file.size > MAX_PHOTO_SIZE) {
+      setSelectedPhoto(null)
+      setPhotoPreview('')
+      setApiError('The photo must be 5 MB or smaller.')
+      return
+    }
+
+    setSelectedPhoto(file)
+    setPhotoPreview(URL.createObjectURL(file))
+  }
+
   async function handleReportSubmit(
-    event: React.FormEvent<HTMLFormElement>
+    event: FormEvent<HTMLFormElement>
   ) {
     event.preventDefault()
     setApiError('')
@@ -191,35 +244,48 @@ function App() {
     setSubmitting(true)
 
     try {
-      const response = await fetch(API_URL, {
+      const body = new FormData()
+
+      body.append('name', form.name.trim())
+      body.append('type', form.type)
+      body.append('breed', form.breed.trim())
+      body.append('color', form.color.trim())
+      body.append('location', form.location.trim())
+      body.append('status', form.status)
+      body.append('description', form.description.trim())
+
+      if (selectedPhoto) {
+        body.append('image', selectedPhoto)
+      }
+
+      const response = await fetch(PHOTO_UPLOAD_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: form.name.trim(),
-          type: form.type,
-          breed: form.breed.trim(),
-          color: form.color.trim(),
-          location: form.location.trim(),
-          status: form.status,
-          description: form.description.trim(),
-        }),
+        body,
       })
 
-      const data = await response.json()
+      const data: DatabaseReport & { error?: string } =
+        await response.json()
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to submit your report.')
       }
 
-      const newPet = formatReport(data as DatabaseReport)
+      const newPet = formatReport(data)
 
       setPetReports((previous) => [newPet, ...previous])
       setQuery('')
       setStatusFilter('All')
       setAnimalFilter('All')
       setForm({ ...initialForm })
+      setSelectedPhoto(null)
+      setPhotoPreview('')
+
+      const photoInput = document.getElementById(
+        'pet-photo'
+      ) as HTMLInputElement | null
+
+      if (photoInput) photoInput.value = ''
+
       setFormSuccess(true)
 
       document.getElementById('reports')?.scrollIntoView({
@@ -248,18 +314,12 @@ function App() {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#090b0b] text-[#f3f3ed]">
-      {/* Navigation */}
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#090b0b]/90 backdrop-blur-xl">
         <nav className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
-          <a
-            href="#home"
-            className="flex items-center gap-3"
-            aria-label="PAWTRACE home"
-          >
+          <a href="#home" className="flex items-center gap-3" aria-label="PAWTRACE home">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#c9fa67] text-black">
               <PawPrint size={23} />
             </span>
-
             <span className="text-xl font-black tracking-tight">
               PAW<span className="text-[#c9fa67]">TRACE</span>
             </span>
@@ -281,8 +341,7 @@ function App() {
             href="#report"
             className="hidden items-center gap-2 rounded-full bg-[#c9fa67] px-5 py-3 text-sm font-bold text-black transition hover:bg-[#d9ff92] sm:flex"
           >
-            <Plus size={17} />
-            Report a pet
+            <Plus size={17} /> Report a pet
           </a>
 
           <button
@@ -297,13 +356,22 @@ function App() {
 
         {mobileMenuOpen && (
           <div className="flex flex-col gap-4 border-t border-white/10 px-5 py-5 text-sm md:hidden">
-            <a href="#reports" onClick={() => setMobileMenuOpen(false)}>
+            <a
+              href="#reports"
+              onClick={() => setMobileMenuOpen(false)}
+            >
               Pet reports
             </a>
-            <a href="#how-it-works" onClick={() => setMobileMenuOpen(false)}>
+            <a
+              href="#how-it-works"
+              onClick={() => setMobileMenuOpen(false)}
+            >
               How it works
             </a>
-            <a href="#about" onClick={() => setMobileMenuOpen(false)}>
+            <a
+              href="#about"
+              onClick={() => setMobileMenuOpen(false)}
+            >
               About
             </a>
             <a
@@ -318,26 +386,24 @@ function App() {
       </header>
 
       <main>
-        {/* Hero */}
         <section id="home" className="relative">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_75%_30%,rgba(201,250,103,0.09),transparent_45%)]" />
 
           <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-5 py-20 sm:px-8 sm:py-28 lg:grid-cols-[1.05fr_0.95fr]">
             <div>
               <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[#c9fa67]/25 bg-[#c9fa67]/5 px-4 py-2 text-xs font-medium text-[#c9fa67]">
-                <Sparkles size={14} />
-                EVERY LITTLE LIFE MATTERS
+                <Sparkles size={14} /> EVERY LITTLE LIFE MATTERS
               </div>
 
               <h1 className="max-w-2xl text-5xl font-black leading-[1.06] tracking-tight sm:text-6xl lg:text-7xl">
-                Lost doesn't
-                <br />
+                Lost doesn't<br />
                 mean <span className="text-[#c9fa67]">gone.</span>
               </h1>
 
               <p className="mt-7 max-w-lg text-base leading-7 text-white/55 sm:text-lg">
-                A missing pet is more than a missing face. Help families
-                reconnect with their best friends, one sighting at a time.
+                A missing pet is more than a missing face.
+                Help families reconnect with their best friends,
+                one sighting at a time.
               </p>
 
               <div className="mt-9 flex flex-wrap gap-3">
@@ -345,33 +411,43 @@ function App() {
                   href="#reports"
                   className="inline-flex items-center gap-2 rounded-full bg-[#c9fa67] px-6 py-4 font-bold text-black transition hover:scale-[1.02]"
                 >
-                  Find a pet
-                  <ArrowRight size={18} />
+                  Find a pet <ArrowRight size={18} />
                 </a>
 
                 <a
                   href="#report"
                   className="inline-flex items-center gap-2 rounded-full border border-white/15 px-6 py-4 font-semibold transition hover:border-[#c9fa67]/60"
                 >
-                  Report a sighting
-                  <ArrowDownRight size={18} />
+                  Report a sighting <ArrowDownRight size={18} />
                 </a>
               </div>
 
               <div className="mt-12 grid max-w-md grid-cols-3 gap-4 border-t border-white/10 pt-7">
                 <div>
-                  <p className="text-2xl font-black">{petReports.length}</p>
-                  <p className="mt-1 text-xs text-white/45">Total reports</p>
+                  <p className="text-2xl font-black">
+                    {petReports.length}
+                  </p>
+                  <p className="mt-1 text-xs text-white/45">
+                    Total reports
+                  </p>
                 </div>
+
                 <div>
                   <p className="text-2xl font-black text-[#c9fa67]">
                     {lostCount}
                   </p>
-                  <p className="mt-1 text-xs text-white/45">Lost pets</p>
+                  <p className="mt-1 text-xs text-white/45">
+                    Lost pets
+                  </p>
                 </div>
+
                 <div>
-                  <p className="text-2xl font-black">{foundCount}</p>
-                  <p className="mt-1 text-xs text-white/45">Found pets</p>
+                  <p className="text-2xl font-black">
+                    {foundCount}
+                  </p>
+                  <p className="mt-1 text-xs text-white/45">
+                    Found pets
+                  </p>
                 </div>
               </div>
             </div>
@@ -396,8 +472,11 @@ function App() {
                     <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#c9fa67]/10 text-[#c9fa67]">
                       <Heart size={21} />
                     </span>
+
                     <div>
-                      <p className="font-bold">Every report makes a difference.</p>
+                      <p className="font-bold">
+                        Every report makes a difference.
+                      </p>
                       <p className="mt-1 text-xs text-white/50">
                         Help spread the word in your community.
                       </p>
@@ -409,7 +488,6 @@ function App() {
           </div>
         </section>
 
-        {/* Reports */}
         <section
           id="reports"
           className="scroll-mt-24 border-t border-white/10 bg-[#0d100f] py-20 sm:py-24"
@@ -424,8 +502,8 @@ function App() {
                   Pets that need us.
                 </h2>
                 <p className="mt-4 max-w-xl leading-7 text-white/50">
-                  Search reports from the community and help reunite pets with
-                  the people who love them.
+                  Search reports from the community and help reunite pets
+                  with the people who love them.
                 </p>
               </div>
 
@@ -433,15 +511,16 @@ function App() {
                 href="#report"
                 className="inline-flex w-fit items-center gap-2 rounded-full border border-white/15 px-5 py-3 text-sm font-semibold transition hover:border-[#c9fa67] hover:text-[#c9fa67]"
               >
-                <Plus size={17} />
-                Add a report
+                <Plus size={17} /> Add a report
               </a>
             </div>
 
-            {/* Search and filters */}
             <div className="mt-10 grid gap-3 lg:grid-cols-[1fr_auto_auto]">
               <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#151817] px-4">
-                <Search size={19} className="shrink-0 text-white/40" />
+                <Search
+                  size={19}
+                  className="shrink-0 text-white/40"
+                />
                 <input
                   type="search"
                   value={query}
@@ -497,16 +576,19 @@ function App() {
                   size={35}
                   className="mx-auto text-[#c9fa67]/70"
                 />
+
                 <h3 className="mt-4 text-xl font-bold">
                   {petReports.length === 0
                     ? 'No reports yet'
                     : 'No matching pets'}
                 </h3>
+
                 <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/45">
                   {petReports.length === 0
                     ? 'Be the first to create a report and help a pet find its way home.'
                     : 'Try another search term or change your filters.'}
                 </p>
+
                 {petReports.length === 0 ? (
                   <a
                     href="#report"
@@ -544,7 +626,7 @@ function App() {
                     >
                       <div className="relative h-60 overflow-hidden bg-[#202421]">
                         <img
-                          src={pet.image || (pet.type === 'Cat' ? catImage : dogImage)}
+                          src={pet.image}
                           alt={`${pet.name}, ${pet.type}`}
                           loading="lazy"
                           className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
@@ -557,7 +639,9 @@ function App() {
                               : 'bg-[#c9fa67] text-black'
                           }`}
                         >
-                          {pet.status === 'Lost' ? 'LOST PET' : 'FOUND PET'}
+                          {pet.status === 'Lost'
+                            ? 'LOST PET'
+                            : 'FOUND PET'}
                         </span>
 
                         <button
@@ -584,7 +668,9 @@ function App() {
                       <div className="p-5">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <h3 className="text-xl font-bold">{pet.name}</h3>
+                            <h3 className="text-xl font-bold">
+                              {pet.name}
+                            </h3>
                             <p className="mt-1 text-sm text-white/45">
                               {pet.breed || pet.type}
                             </p>
@@ -606,7 +692,9 @@ function App() {
 
                           {pet.color && (
                             <p>
-                              <span className="text-white/35">Colour:</span>{' '}
+                              <span className="text-white/35">
+                                Colour:
+                              </span>{' '}
                               {pet.color}
                             </p>
                           )}
@@ -632,7 +720,6 @@ function App() {
           </div>
         </section>
 
-        {/* How it works */}
         <section
           id="how-it-works"
           className="scroll-mt-24 border-t border-white/10 py-20 sm:py-24"
@@ -642,12 +729,14 @@ function App() {
               <p className="mb-3 text-xs font-bold tracking-[0.25em] text-[#c9fa67]">
                 SMALL ACTIONS. BIG DIFFERENCE.
               </p>
+
               <h2 className="text-3xl font-black sm:text-5xl">
                 How PAWTRACE works.
               </h2>
+
               <p className="mt-4 leading-7 text-white/50">
-                A simple way for people to share information and help pets get
-                back home.
+                A simple way for people to share information and
+                help pets get back home.
               </p>
             </div>
 
@@ -679,7 +768,11 @@ function App() {
                   <span className="text-sm font-bold tracking-widest text-[#c9fa67]">
                     {item.number}
                   </span>
-                  <h3 className="mt-7 text-xl font-bold">{item.title}</h3>
+
+                  <h3 className="mt-7 text-xl font-bold">
+                    {item.title}
+                  </h3>
+
                   <p className="mt-3 text-sm leading-7 text-white/50">
                     {item.description}
                   </p>
@@ -689,7 +782,6 @@ function App() {
           </div>
         </section>
 
-        {/* Report form */}
         <section
           id="report"
           className="scroll-mt-24 border-t border-white/10 bg-[#0d100f] py-20 sm:py-24"
@@ -703,12 +795,15 @@ function App() {
               <h2 className="text-3xl font-black leading-tight sm:text-5xl">
                 Every detail
                 <br />
-                <span className="text-[#c9fa67]">could matter.</span>
+                <span className="text-[#c9fa67]">
+                  could matter.
+                </span>
               </h2>
 
               <p className="mt-5 max-w-md leading-7 text-white/50">
-                Whether a pet is missing or you have found one, share what you
-                know. Someone may be looking for them right now.
+                Whether a pet is missing or you have found one,
+                share what you know. Someone may be looking for
+                them right now.
               </p>
 
               <div className="mt-8 flex items-start gap-3 rounded-xl border border-[#c9fa67]/15 bg-[#c9fa67]/5 p-4">
@@ -716,9 +811,11 @@ function App() {
                   size={22}
                   className="mt-0.5 shrink-0 text-[#c9fa67]"
                 />
+
                 <p className="text-sm leading-6 text-white/65">
-                  Keep your report accurate. Avoid publishing sensitive
-                  personal information or your private home address.
+                  Keep your report accurate. Avoid publishing
+                  sensitive personal information or your
+                  private home address.
                 </p>
               </div>
             </div>
@@ -728,7 +825,9 @@ function App() {
               className="rounded-2xl border border-white/10 bg-[#151817] p-5 sm:p-8"
             >
               <div className="mb-7">
-                <h3 className="text-xl font-bold">Create a pet report</h3>
+                <h3 className="text-xl font-bold">
+                  Create a pet report
+                </h3>
                 <p className="mt-2 text-sm text-white/45">
                   Complete the details below.
                 </p>
@@ -739,7 +838,10 @@ function App() {
                   role="status"
                   className="mb-6 flex items-start gap-3 rounded-xl border border-[#c9fa67]/20 bg-[#c9fa67]/5 p-4 text-sm leading-6 text-[#c9fa67]"
                 >
-                  <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
+                  <CheckCircle2
+                    size={20}
+                    className="mt-0.5 shrink-0"
+                  />
                   Your report was saved successfully!
                 </div>
               )}
@@ -756,8 +858,10 @@ function App() {
               <div className="grid gap-5 sm:grid-cols-2">
                 <label className="block text-sm sm:col-span-2">
                   <span className="mb-2 block font-medium">
-                    Pet name <span className="text-[#c9fa67]">*</span>
+                    Pet name{' '}
+                    <span className="text-[#c9fa67]">*</span>
                   </span>
+
                   <input
                     required
                     maxLength={100}
@@ -772,8 +876,10 @@ function App() {
 
                 <label className="block text-sm">
                   <span className="mb-2 block font-medium">
-                    Report type <span className="text-[#c9fa67]">*</span>
+                    Report type{' '}
+                    <span className="text-[#c9fa67]">*</span>
                   </span>
+
                   <select
                     required
                     value={form.status}
@@ -792,8 +898,10 @@ function App() {
 
                 <label className="block text-sm">
                   <span className="mb-2 block font-medium">
-                    Animal type <span className="text-[#c9fa67]">*</span>
+                    Animal type{' '}
+                    <span className="text-[#c9fa67]">*</span>
                   </span>
+
                   <select
                     required
                     value={form.type}
@@ -811,7 +919,10 @@ function App() {
                 </label>
 
                 <label className="block text-sm">
-                  <span className="mb-2 block font-medium">Breed</span>
+                  <span className="mb-2 block font-medium">
+                    Breed
+                  </span>
+
                   <input
                     maxLength={100}
                     value={form.breed}
@@ -824,7 +935,10 @@ function App() {
                 </label>
 
                 <label className="block text-sm">
-                  <span className="mb-2 block font-medium">Main colour</span>
+                  <span className="mb-2 block font-medium">
+                    Main colour
+                  </span>
+
                   <input
                     maxLength={100}
                     value={form.color}
@@ -838,8 +952,59 @@ function App() {
 
                 <label className="block text-sm sm:col-span-2">
                   <span className="mb-2 block font-medium">
-                    Location <span className="text-[#c9fa67]">*</span>
+                    Pet photo{' '}
+                    <span className="text-white/40">
+                      (optional)
+                    </span>
                   </span>
+
+                  <input
+                    id="pet-photo"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(event) =>
+                      handlePhotoChange(event.target.files?.[0])
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-[#c9fa67] file:px-4 file:py-2 file:font-bold file:text-black"
+                  />
+
+                  <span className="mt-2 block text-xs text-white/40">
+                    JPG, PNG or WebP · Maximum size: 5 MB
+                  </span>
+
+                  {photoPreview && (
+                    <div className="mt-4">
+                      <img
+                        src={photoPreview}
+                        alt="Preview of the selected pet"
+                        className="h-48 w-full rounded-xl border border-white/10 object-cover"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handlePhotoChange(undefined)
+
+                          const input = document.getElementById(
+                            'pet-photo'
+                          ) as HTMLInputElement | null
+
+                          if (input) input.value = ''
+                        }}
+                        className="mt-2 text-sm text-[#c9fa67] hover:underline"
+                      >
+                        Remove photo
+                      </button>
+                    </div>
+                  )}
+                </label>
+
+                <label className="block text-sm sm:col-span-2">
+                  <span className="mb-2 block font-medium">
+                    Location{' '}
+                    <span className="text-[#c9fa67]">*</span>
+                  </span>
+
                   <input
                     required
                     maxLength={255}
@@ -848,14 +1013,16 @@ function App() {
                       updateForm('location', event.target.value)
                     }
                     placeholder="e.g. Kandy, near the town centre"
-                    className="w-full rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 outline-none placeholder:text-white/25 focus:border-[#c9fa67]/60"
+                    className="w-full rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 outline-none transition placeholder:text-white/25 focus:border-[#c9fa67]/60"
                   />
                 </label>
 
                 <label className="block text-sm sm:col-span-2">
                   <span className="mb-2 block font-medium">
-                    Description <span className="text-[#c9fa67]">*</span>
+                    Description{' '}
+                    <span className="text-[#c9fa67]">*</span>
                   </span>
+
                   <textarea
                     required
                     minLength={10}
@@ -868,6 +1035,7 @@ function App() {
                     placeholder="Describe the pet, when it went missing or where it was found, and any identifying details..."
                     className="w-full resize-y rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 leading-6 outline-none placeholder:text-white/25 focus:border-[#c9fa67]/60"
                   />
+
                   <span className="mt-2 block text-right text-xs text-white/35">
                     {form.description.length}/1000
                   </span>
@@ -883,8 +1051,7 @@ function App() {
                   'Submitting report...'
                 ) : (
                   <>
-                    Submit report
-                    <ArrowRight size={18} />
+                    Submit report <ArrowRight size={18} />
                   </>
                 )}
               </button>
@@ -896,7 +1063,6 @@ function App() {
           </div>
         </section>
 
-        {/* About */}
         <section
           id="about"
           className="scroll-mt-24 border-t border-white/10 py-14"
@@ -906,6 +1072,7 @@ function App() {
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#c9fa67] text-black">
                 <PawPrint size={22} />
               </span>
+
               <div>
                 <p className="font-black tracking-tight">
                   PAW<span className="text-[#c9fa67]">TRACE</span>
