@@ -55,6 +55,39 @@ app.get('/api/reports', async (req, res) => {
   }
 });
 
+ // Get a single pet report by ID
+app.get('/api/reports/:id', async (req, res) => {
+  const { id } = req.params;
+
+  // Validate the report ID
+  if (!/^[1-9]\d*$/.test(id) || id.length > 19) {
+    return res.status(400).json({
+      error: 'Invalid pet report ID.',
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      'SELECT * FROM pet_reports WHERE id = $1',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Pet report not found.',
+      });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Failed to fetch pet report:', error);
+
+    res.status(500).json({
+      error: 'Failed to fetch pet report.',
+    });
+  }
+});
+
 // Create a pet report without a photo
 app.post('/api/reports', async (req, res) => {
   const {
