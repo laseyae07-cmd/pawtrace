@@ -21,6 +21,8 @@ import {
 import AuthPage from './AuthPage'
 import type { AuthUser } from './AuthPage'
 import MyReports from './MyReports'
+import PetDetails from './PetDetails'
+import PetPhotoCropper from './PetPhotoCropper'
 
 type Pet = {
   id: number
@@ -64,7 +66,6 @@ const AUTH_URL = `${API_BASE_URL}/api/auth`
 const PHOTO_UPLOAD_URL = `${API_URL}/with-photo`
 
 const MAX_PHOTO_SIZE = 5 * 1024 * 1024
-
 const ALLOWED_IMAGE_TYPES = [
   'image/jpeg',
   'image/png',
@@ -86,6 +87,9 @@ const initialForm: ReportForm = {
   status: 'Lost',
   description: '',
 }
+
+const fieldClass =
+  'w-full rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-[#c9fa67]/60'
 
 function formatReport(report: DatabaseReport): Pet {
   const image = report.image_url
@@ -112,30 +116,22 @@ function formatReport(report: DatabaseReport): Pet {
 }
 
 function App() {
-  // ============================================
-  // PET REPORT STATES
-  // ============================================
-
+  // Pet report state
   const [petReports, setPetReports] = useState<Pet[]>([])
   const [loadingReports, setLoadingReports] = useState(true)
   const [apiError, setApiError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [formSuccess, setFormSuccess] = useState(false)
+  const [reportsVersion, setReportsVersion] = useState(0)
 
-  // ============================================
-  // SEARCH AND FILTER STATES
-  // ============================================
-
+  // Search and filter state
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [animalFilter, setAnimalFilter] = useState('All')
   const [savedPets, setSavedPets] = useState<number[]>([])
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
-  // ============================================
-  // REPORT FORM STATES
-  // ============================================
-
+  // Report form and crop editor state
   const [form, setForm] = useState<ReportForm>({
     ...initialForm,
   })
@@ -143,39 +139,41 @@ function App() {
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(
     null
   )
-
   const [photoPreview, setPhotoPreview] = useState('')
-
-  // ============================================
-  // AUTHENTICATION STATES
-  // ============================================
-
-  const [authOpen, setAuthOpen] = useState(false)
-
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(
+  const [pendingPhoto, setPendingPhoto] = useState<File | null>(
+    null
+  )
+  const [originalPhoto, setOriginalPhoto] = useState<File | null>(
     null
   )
 
+  // Authentication state
+  const [authOpen, setAuthOpen] = useState(false)
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(
+    null
+  )
   const [authLoading, setAuthLoading] = useState(true)
   const [loggingOut, setLoggingOut] = useState(false)
   const [accountError, setAccountError] = useState('')
 
-  // ============================================
-  // MY REPORTS DASHBOARD STATE
-  // ============================================
-
+  // Dashboard and Pet Details navigation
   const [showMyReports, setShowMyReports] = useState(false)
 
-  // ============================================
-  // LOAD ALL PET REPORTS
-  // ============================================
+  const [selectedReportId, setSelectedReportId] = useState<
+    string | null
+  >(
+    () => new URLSearchParams(window.location.search).get('pet')
+  )
 
+  // Load public pet reports
   useEffect(() => {
-    let cancelled = false
+    const controller = new AbortController()
 
     async function loadReports() {
       try {
-        const response = await fetch(API_URL)
+        const response = await fetch(API_URL, {
+          signal: controller.signal,
+        })
 
         if (!response.ok) {
           throw new Error('Could not load pet reports.')
@@ -183,20 +181,18 @@ function App() {
 
         const data: DatabaseReport[] = await response.json()
 
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setPetReports(data.map(formatReport))
-          setApiError('')
         }
       } catch (error) {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           console.error('Loading reports failed:', error)
-
           setApiError(
-            'Unable to connect to the PAWTRACE server. Make sure your backend is running.'
+            'Unable to load pet reports. Make sure the backend is running.'
           )
         }
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setLoadingReports(false)
         }
       }
@@ -204,22 +200,16 @@ function App() {
 
     void loadReports()
 
-    return () => {
-      cancelled = true
-    }
-  }, [])
+    return () => controller.abort()
+  }, [reportsVersion])
 
-  // ============================================
-  // RESTORE LOGIN SESSION
-  // ============================================
-
+  // Restore the login session after refreshing
   useEffect(() => {
     const controller = new AbortController()
 
     async function restoreSession() {
       try {
         const response = await fetch(`${AUTH_URL}/me`, {
-          method: 'GET',
           credentials: 'include',
           signal: controller.signal,
         })
@@ -250,10 +240,7 @@ function App() {
     return () => controller.abort()
   }, [])
 
-  // ============================================
-  // PHOTO PREVIEW CLEANUP
-  // ============================================
-
+  // Release temporary preview URLs
   useEffect(() => {
     return () => {
       if (photoPreview) {
@@ -262,10 +249,22 @@ function App() {
     }
   }, [photoPreview])
 
-  // ============================================
-  // SEARCH AND FILTER PET REPORTS
-  // ============================================
+  // Support browser Back and Forward for Pet Details
+  useEffect(() => {
+    function handleNavigation() {
+      setSelectedReportId(
+        new URLSearchParams(window.location.search).get('pet')
+      )
+    }
 
+    window.addEventListener('popstate', handleNavigation)
+
+    return () => {
+      window.removeEventListener('popstate', handleNavigation)
+    }
+  }, [])
+
+  // Filter the community board
   const filteredPets = useMemo(() => {
     const searchTerm = query.trim().toLowerCase()
 
@@ -282,21 +281,15 @@ function App() {
         .toLowerCase()
         .includes(searchTerm)
 
-      const matchesStatus =
-        statusFilter === 'All' ||
-        pet.status === statusFilter
-
-      const matchesAnimal =
-        animalFilter === 'All' ||
-        pet.type === animalFilter
-
-      return matchesSearch && matchesStatus && matchesAnimal
+      return (
+        matchesSearch &&
+        (statusFilter === 'All' ||
+          pet.status === statusFilter) &&
+        (animalFilter === 'All' ||
+          pet.type === animalFilter)
+      )
     })
   }, [petReports, query, statusFilter, animalFilter])
-
-  // ============================================
-  // UPDATE REPORT FORM
-  // ============================================
 
   function updateForm<K extends keyof ReportForm>(
     field: K,
@@ -308,10 +301,6 @@ function App() {
     }))
   }
 
-  // ============================================
-  // SAVE / UNSAVE PET
-  // ============================================
-
   function toggleSaved(id: number) {
     setSavedPets((previous) =>
       previous.includes(id)
@@ -320,10 +309,7 @@ function App() {
     )
   }
 
-  // ============================================
-  // AUTHENTICATION FUNCTIONS
-  // ============================================
-
+  // Authentication
   function openAuthPage() {
     setAccountError('')
     setMobileMenuOpen(false)
@@ -334,8 +320,8 @@ function App() {
     setCurrentUser(user)
     setAuthLoading(false)
     setAuthOpen(false)
-    setMobileMenuOpen(false)
     setAccountError('')
+    setMobileMenuOpen(false)
   }
 
   async function handleLogout() {
@@ -349,9 +335,7 @@ function App() {
       })
 
       if (!response.ok) {
-        throw new Error(
-          'Unable to log out. Please try again.'
-        )
+        throw new Error('Unable to log out. Please try again.')
       }
 
       setCurrentUser(null)
@@ -369,10 +353,7 @@ function App() {
     }
   }
 
-  // ============================================
-  // MY REPORTS NAVIGATION
-  // ============================================
-
+  // My Reports navigation
   function openMyReports() {
     if (!currentUser) {
       openAuthPage()
@@ -386,11 +367,13 @@ function App() {
 
   function returnToHomepage() {
     setShowMyReports(false)
+    setReportsVersion((version) => version + 1)
     window.scrollTo(0, 0)
   }
 
   function createReportFromDashboard() {
     setShowMyReports(false)
+    setReportsVersion((version) => version + 1)
 
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
@@ -401,43 +384,38 @@ function App() {
     })
   }
 
-  // ============================================
-  // PHOTO UPLOAD VALIDATION
-  // ============================================
+  // Pet Details navigation
+  function openPetDetails(id: number) {
+    const url = new URL(window.location.href)
 
-  function handlePhotoChange(file: File | undefined) {
-    setApiError('')
-    setFormSuccess(false)
+    url.searchParams.set('pet', String(id))
+    url.hash = ''
 
-    if (!file) {
-      setSelectedPhoto(null)
-      setPhotoPreview('')
-      return
-    }
+    window.history.pushState({}, '', url.toString())
 
-    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-      setSelectedPhoto(null)
-      setPhotoPreview('')
-      setApiError('Choose a JPG, PNG, or WebP image.')
-      return
-    }
-
-    if (file.size > MAX_PHOTO_SIZE) {
-      setSelectedPhoto(null)
-      setPhotoPreview('')
-      setApiError('The photo must be 5 MB or smaller.')
-      return
-    }
-
-    setSelectedPhoto(file)
-    setPhotoPreview(URL.createObjectURL(file))
+    setSelectedReportId(String(id))
+    window.scrollTo(0, 0)
   }
 
-  function handleRemovePhoto() {
-    setSelectedPhoto(null)
-    setPhotoPreview('')
-    setApiError('')
+  function closePetDetails() {
+    const url = new URL(window.location.href)
 
+    url.searchParams.delete('pet')
+    url.hash = ''
+
+    window.history.pushState({}, '', url.toString())
+
+    setSelectedReportId(null)
+
+    window.requestAnimationFrame(() => {
+      document.getElementById('reports')?.scrollIntoView({
+        behavior: 'smooth',
+      })
+    })
+  }
+
+  // Crop and Zoom
+  function clearFileInput() {
     const input = document.getElementById(
       'pet-photo'
     ) as HTMLInputElement | null
@@ -447,19 +425,60 @@ function App() {
     }
   }
 
-  // ============================================
-  // SUBMIT PET REPORT
-  // ============================================
+  function handlePhotoChange(file: File | undefined) {
+    setApiError('')
+    setFormSuccess(false)
 
+    if (!file) return
+
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      setApiError('Choose a JPG, PNG, or WebP image.')
+      clearFileInput()
+      return
+    }
+
+    if (file.size > MAX_PHOTO_SIZE) {
+      setApiError('The photo must be 5 MB or smaller.')
+      clearFileInput()
+      return
+    }
+
+    setPendingPhoto(file)
+  }
+
+  function handleCropSaved(file: File) {
+    if (pendingPhoto) {
+      setOriginalPhoto(pendingPhoto)
+    }
+
+    setSelectedPhoto(file)
+    setPhotoPreview(URL.createObjectURL(file))
+    setPendingPhoto(null)
+    clearFileInput()
+  }
+
+  function handleCropCancelled() {
+    setPendingPhoto(null)
+    clearFileInput()
+  }
+
+  function handleRemovePhoto() {
+    setSelectedPhoto(null)
+    setPhotoPreview('')
+    setOriginalPhoto(null)
+    setPendingPhoto(null)
+    setApiError('')
+    clearFileInput()
+  }
+
+  // Create an authenticated report
   async function handleReportSubmit(
     event: FormEvent<HTMLFormElement>
   ) {
     event.preventDefault()
-
     setApiError('')
     setFormSuccess(false)
 
-    // Users must log in before creating reports
     if (!currentUser) {
       setApiError(
         'Please log in before submitting a pet report.'
@@ -493,7 +512,6 @@ function App() {
 
       if (response.status === 401) {
         setCurrentUser(null)
-
         throw new Error(
           'Your session has expired. Please log in again.'
         )
@@ -508,9 +526,10 @@ function App() {
         )
       }
 
-      const newPet = formatReport(data)
-
-      setPetReports((previous) => [newPet, ...previous])
+      setPetReports((previous) => [
+        formatReport(data),
+        ...previous,
+      ])
 
       setQuery('')
       setStatusFilter('All')
@@ -518,15 +537,10 @@ function App() {
       setForm({ ...initialForm })
       setSelectedPhoto(null)
       setPhotoPreview('')
+      setOriginalPhoto(null)
+      setPendingPhoto(null)
 
-      const photoInput = document.getElementById(
-        'pet-photo'
-      ) as HTMLInputElement | null
-
-      if (photoInput) {
-        photoInput.value = ''
-      }
-
+      clearFileInput()
       setFormSuccess(true)
 
       document.getElementById('reports')?.scrollIntoView({
@@ -545,10 +559,6 @@ function App() {
     }
   }
 
-  // ============================================
-  // REPORT STATISTICS
-  // ============================================
-
   const lostCount = petReports.filter(
     (pet) => pet.status === 'Lost'
   ).length
@@ -557,9 +567,16 @@ function App() {
     (pet) => pet.status === 'Found'
   ).length
 
-  // ============================================
-  // MY REPORTS DASHBOARD VIEW
-  // ============================================
+  // Conditional views must come after every hook
+  if (selectedReportId) {
+    return (
+      <PetDetails
+        key={selectedReportId}
+        reportId={selectedReportId}
+        onBack={closePetDetails}
+      />
+    )
+  }
 
   if (showMyReports && currentUser) {
     return (
@@ -570,18 +587,11 @@ function App() {
     )
   }
 
-  // ============================================
-  // MAIN WEBSITE
-  // ============================================
-
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#090b0b] text-[#f3f3ed]">
-
       {/* Navigation */}
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#090b0b]/90 backdrop-blur-xl">
         <nav className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 sm:px-8">
-
-          {/* Logo */}
           <a
             href="#home"
             className="flex shrink-0 items-center gap-3"
@@ -592,14 +602,11 @@ function App() {
             </span>
 
             <span className="text-xl font-black tracking-tight">
-              PAW
-              <span className="text-[#c9fa67]">
-                TRACE
-              </span>
+              PAW<span className="text-[#c9fa67]">TRACE</span>
             </span>
           </a>
 
-          {/* Desktop links */}
+          {/* Desktop navigation */}
           <div className="hidden items-center gap-7 text-sm text-white/65 md:flex">
             <a
               href="#reports"
@@ -607,14 +614,12 @@ function App() {
             >
               Pet reports
             </a>
-
             <a
               href="#how-it-works"
               className="transition hover:text-[#c9fa67]"
             >
               How it works
             </a>
-
             <a
               href="#about"
               className="transition hover:text-[#c9fa67]"
@@ -623,7 +628,7 @@ function App() {
             </a>
           </div>
 
-          {/* Desktop account controls */}
+          {/* Desktop authentication controls */}
           <div className="hidden items-center gap-3 md:flex">
             {authLoading ? (
               <span className="text-xs text-white/40">
@@ -636,13 +641,11 @@ function App() {
                     size={17}
                     className="shrink-0 text-[#c9fa67]"
                   />
-
                   <span className="truncate">
                     {currentUser.full_name}
                   </span>
                 </div>
 
-                {/* My Reports button */}
                 <button
                   type="button"
                   onClick={openMyReports}
@@ -651,7 +654,6 @@ function App() {
                   My Reports
                 </button>
 
-                {/* Logout button */}
                 <button
                   type="button"
                   onClick={handleLogout}
@@ -659,9 +661,7 @@ function App() {
                   className="inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-3 text-sm font-semibold transition hover:border-red-400/40 hover:text-red-300 disabled:opacity-50"
                 >
                   <LogOut size={16} />
-                  {loggingOut
-                    ? 'Logging out...'
-                    : 'Log out'}
+                  {loggingOut ? 'Logging out...' : 'Log out'}
                 </button>
               </>
             ) : (
@@ -684,7 +684,7 @@ function App() {
             </a>
           </div>
 
-          {/* Mobile menu toggle */}
+          {/* Mobile navigation toggle */}
           <button
             type="button"
             className="rounded-lg border border-white/15 p-2 md:hidden"
@@ -707,21 +707,18 @@ function App() {
             >
               Pet reports
             </a>
-
             <a
               href="#how-it-works"
               onClick={() => setMobileMenuOpen(false)}
             >
               How it works
             </a>
-
             <a
               href="#about"
               onClick={() => setMobileMenuOpen(false)}
             >
               About
             </a>
-
             <a
               href="#report"
               onClick={() => setMobileMenuOpen(false)}
@@ -757,9 +754,7 @@ function App() {
                       className="flex items-center gap-2 font-bold text-[#c9fa67] disabled:opacity-50"
                     >
                       <LogOut size={17} />
-                      {loggingOut
-                        ? 'Logging out...'
-                        : 'Log out'}
+                      {loggingOut ? 'Logging out...' : 'Log out'}
                     </button>
                   </div>
                 ) : (
@@ -788,16 +783,11 @@ function App() {
       </header>
 
       <main>
-
-        {/* ======================================
-            HERO SECTION
-        ====================================== */}
-
+        {/* Hero section */}
         <section id="home" className="relative">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_75%_30%,rgba(201,250,103,0.09),transparent_45%)]" />
 
           <div className="relative mx-auto grid max-w-7xl items-center gap-12 px-5 py-20 sm:px-8 sm:py-28 lg:grid-cols-[1.05fr_0.95fr]">
-
             <div>
               <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[#c9fa67]/25 bg-[#c9fa67]/5 px-4 py-2 text-xs font-medium text-[#c9fa67]">
                 <Sparkles size={14} />
@@ -838,7 +828,6 @@ function App() {
               </div>
 
               <div className="mt-12 grid max-w-md grid-cols-3 gap-4 border-t border-white/10 pt-7">
-
                 <div>
                   <p className="text-2xl font-black">
                     {petReports.length}
@@ -868,7 +857,6 @@ function App() {
               </div>
             </div>
 
-            {/* Hero image */}
             <div className="relative mx-auto w-full max-w-lg">
               <div className="absolute -inset-5 rounded-[2rem] bg-[#c9fa67]/5 blur-2xl" />
 
@@ -894,7 +882,6 @@ function App() {
                       <p className="font-bold">
                         Every report makes a difference.
                       </p>
-
                       <p className="mt-1 text-xs text-white/50">
                         Help spread the word in your community.
                       </p>
@@ -903,20 +890,15 @@ function App() {
                 </div>
               </div>
             </div>
-
           </div>
         </section>
 
-        {/* ======================================
-            COMMUNITY PET REPORTS
-        ====================================== */}
-
+        {/* Community pet reports */}
         <section
           id="reports"
           className="scroll-mt-24 border-t border-white/10 bg-[#0d100f] py-20 sm:py-24"
         >
           <div className="mx-auto max-w-7xl px-5 sm:px-8">
-
             <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
               <div>
                 <p className="mb-3 text-xs font-bold tracking-[0.25em] text-[#c9fa67]">
@@ -944,7 +926,6 @@ function App() {
 
             {/* Search and filters */}
             <div className="mt-10 grid gap-3 lg:grid-cols-[1fr_auto_auto]">
-
               <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#151817] px-4">
                 <Search
                   size={19}
@@ -999,18 +980,14 @@ function App() {
               </div>
             )}
 
-            {/* Loading reports */}
             {loadingReports ? (
               <div className="py-24 text-center">
                 <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-white/15 border-t-[#c9fa67]" />
-
                 <p className="mt-4 text-sm text-white/50">
                   Loading pet reports...
                 </p>
               </div>
             ) : filteredPets.length === 0 ? (
-
-              /* No reports found */
               <div className="mt-8 rounded-2xl border border-dashed border-white/15 px-5 py-16 text-center">
                 <PawPrint
                   size={35}
@@ -1060,15 +1037,12 @@ function App() {
                     : 'reports'}
                 </p>
 
-                {/* Pet report cards */}
                 <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                   {filteredPets.map((pet) => (
                     <article
                       key={pet.id}
                       className="group overflow-hidden rounded-2xl border border-white/10 bg-[#151817] transition duration-300 hover:-translate-y-1 hover:border-[#c9fa67]/30"
                     >
-
-                      {/* Pet image */}
                       <div className="relative h-60 overflow-hidden bg-[#202421]">
                         <img
                           src={pet.image}
@@ -1088,7 +1062,6 @@ function App() {
                             : 'FOUND PET'}
                         </span>
 
-                        {/* Save icon */}
                         <button
                           type="button"
                           onClick={() => toggleSaved(pet.id)}
@@ -1110,14 +1083,12 @@ function App() {
                         </button>
                       </div>
 
-                      {/* Pet information */}
                       <div className="p-5">
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <h3 className="text-xl font-bold">
                               {pet.name}
                             </h3>
-
                             <p className="mt-1 text-sm text-white/45">
                               {pet.breed || pet.type}
                             </p>
@@ -1129,7 +1100,6 @@ function App() {
                         </div>
 
                         <div className="mt-5 space-y-3 text-sm text-white/55">
-
                           <p className="flex items-start gap-2">
                             <MapPin
                               size={16}
@@ -1152,9 +1122,18 @@ function App() {
                           </p>
                         </div>
 
+                        {/* Pet Details integration */}
+                        <button
+                          type="button"
+                          onClick={() => openPetDetails(pet.id)}
+                          className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-[#c9fa67] transition hover:text-[#d9ff92]"
+                        >
+                          View details
+                          <ArrowRight size={16} />
+                        </button>
+
                         <div className="mt-5 flex items-center justify-between border-t border-white/10 pt-4 text-xs text-white/40">
                           <span>{pet.date}</span>
-
                           <span className="inline-flex items-center gap-1.5 text-[#c9fa67]">
                             <ShieldCheck size={15} />
                             Community report
@@ -1169,16 +1148,12 @@ function App() {
           </div>
         </section>
 
-        {/* ======================================
-            HOW IT WORKS
-        ====================================== */}
-
+        {/* How it works */}
         <section
           id="how-it-works"
           className="scroll-mt-24 border-t border-white/10 py-20 sm:py-24"
         >
           <div className="mx-auto max-w-7xl px-5 sm:px-8">
-
             <div className="max-w-2xl">
               <p className="mb-3 text-xs font-bold tracking-[0.25em] text-[#c9fa67]">
                 SMALL ACTIONS. BIG DIFFERENCE.
@@ -1222,11 +1197,9 @@ function App() {
                   <span className="text-sm font-bold tracking-widest text-[#c9fa67]">
                     {item.number}
                   </span>
-
                   <h3 className="mt-7 text-xl font-bold">
                     {item.title}
                   </h3>
-
                   <p className="mt-3 text-sm leading-7 text-white/50">
                     {item.description}
                   </p>
@@ -1236,16 +1209,12 @@ function App() {
           </div>
         </section>
 
-        {/* ======================================
-            REPORT A PET FORM
-        ====================================== */}
-
+        {/* Create pet report */}
         <section
           id="report"
           className="scroll-mt-24 border-t border-white/10 bg-[#0d100f] py-20 sm:py-24"
         >
           <div className="mx-auto grid max-w-7xl gap-12 px-5 sm:px-8 lg:grid-cols-[0.8fr_1.2fr]">
-
             <div>
               <p className="mb-3 text-xs font-bold tracking-[0.25em] text-[#c9fa67]">
                 TAKE THE FIRST STEP
@@ -1270,7 +1239,6 @@ function App() {
                   size={22}
                   className="mt-0.5 shrink-0 text-[#c9fa67]"
                 />
-
                 <p className="text-sm leading-6 text-white/65">
                   Keep your report accurate. Avoid publishing
                   sensitive personal information or your
@@ -1279,28 +1247,23 @@ function App() {
               </div>
             </div>
 
-            {/* Report form */}
             <form
               onSubmit={handleReportSubmit}
               className="rounded-2xl border border-white/10 bg-[#151817] p-5 sm:p-8"
             >
-              <div className="mb-7">
-                <h3 className="text-xl font-bold">
-                  Create a pet report
-                </h3>
+              <h3 className="text-xl font-bold">
+                Create a pet report
+              </h3>
 
-                <p className="mt-2 text-sm text-white/45">
-                  Complete the details below.
-                </p>
-              </div>
+              <p className="mb-7 mt-2 text-sm text-white/45">
+                Complete the details below.
+              </p>
 
-              {/* Login notice */}
               {!authLoading && !currentUser && (
                 <div className="mb-6 flex flex-col gap-3 rounded-xl border border-[#c9fa67]/20 bg-[#c9fa67]/5 p-4 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-white/70">
                     Please log in to submit a pet report.
                   </p>
-
                   <button
                     type="button"
                     onClick={openAuthPage}
@@ -1311,7 +1274,6 @@ function App() {
                 </div>
               )}
 
-              {/* Submission success */}
               {formSuccess && (
                 <div
                   role="status"
@@ -1325,7 +1287,6 @@ function App() {
                 </div>
               )}
 
-              {/* Form error */}
               {apiError && (
                 <div
                   role="alert"
@@ -1336,14 +1297,11 @@ function App() {
               )}
 
               <div className="grid gap-5 sm:grid-cols-2">
-
-                {/* Pet name */}
+                {/* Name */}
                 <label className="block text-sm sm:col-span-2">
                   <span className="mb-2 block font-medium">
                     Pet name{' '}
-                    <span className="text-[#c9fa67]">
-                      *
-                    </span>
+                    <span className="text-[#c9fa67]">*</span>
                   </span>
 
                   <input
@@ -1354,17 +1312,15 @@ function App() {
                       updateForm('name', event.target.value)
                     }
                     placeholder="e.g. Bruno"
-                    className="w-full rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 outline-none transition placeholder:text-white/25 focus:border-[#c9fa67]/60"
+                    className={fieldClass}
                   />
                 </label>
 
-                {/* Report type */}
+                {/* Status */}
                 <label className="block text-sm">
                   <span className="mb-2 block font-medium">
                     Report type{' '}
-                    <span className="text-[#c9fa67]">
-                      *
-                    </span>
+                    <span className="text-[#c9fa67]">*</span>
                   </span>
 
                   <select
@@ -1376,25 +1332,18 @@ function App() {
                         event.target.value as ReportForm['status']
                       )
                     }
-                    className="w-full rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 outline-none focus:border-[#c9fa67]/60"
+                    className={fieldClass}
                   >
-                    <option value="Lost">
-                      Lost pet
-                    </option>
-
-                    <option value="Found">
-                      Found pet
-                    </option>
+                    <option value="Lost">Lost pet</option>
+                    <option value="Found">Found pet</option>
                   </select>
                 </label>
 
-                {/* Animal type */}
+                {/* Animal */}
                 <label className="block text-sm">
                   <span className="mb-2 block font-medium">
                     Animal type{' '}
-                    <span className="text-[#c9fa67]">
-                      *
-                    </span>
+                    <span className="text-[#c9fa67]">*</span>
                   </span>
 
                   <select
@@ -1406,15 +1355,10 @@ function App() {
                         event.target.value as ReportForm['type']
                       )
                     }
-                    className="w-full rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 outline-none focus:border-[#c9fa67]/60"
+                    className={fieldClass}
                   >
-                    <option value="Dog">
-                      Dog
-                    </option>
-
-                    <option value="Cat">
-                      Cat
-                    </option>
+                    <option value="Dog">Dog</option>
+                    <option value="Cat">Cat</option>
                   </select>
                 </label>
 
@@ -1431,11 +1375,11 @@ function App() {
                       updateForm('breed', event.target.value)
                     }
                     placeholder="e.g. Labrador"
-                    className="w-full rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 outline-none placeholder:text-white/25 focus:border-[#c9fa67]/60"
+                    className={fieldClass}
                   />
                 </label>
 
-                {/* Main colour */}
+                {/* Colour */}
                 <label className="block text-sm">
                   <span className="mb-2 block font-medium">
                     Main colour
@@ -1448,11 +1392,11 @@ function App() {
                       updateForm('color', event.target.value)
                     }
                     placeholder="e.g. Brown and white"
-                    className="w-full rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 outline-none placeholder:text-white/25 focus:border-[#c9fa67]/60"
+                    className={fieldClass}
                   />
                 </label>
 
-                {/* Pet photo */}
+                {/* Photo upload */}
                 <div className="sm:col-span-2">
                   <label
                     htmlFor="pet-photo"
@@ -1478,7 +1422,6 @@ function App() {
                     JPG, PNG or WebP · Maximum size: 5 MB
                   </p>
 
-                  {/* Photo preview */}
                   {photoPreview && (
                     <div className="mt-4">
                       <img
@@ -1487,13 +1430,27 @@ function App() {
                         className="h-48 w-full rounded-xl border border-white/10 bg-[#0c0e0d] object-contain"
                       />
 
-                      <button
-                        type="button"
-                        onClick={handleRemovePhoto}
-                        className="mt-3 text-sm font-semibold text-[#c9fa67] hover:underline"
-                      >
-                        Remove photo
-                      </button>
+                      <div className="mt-3 flex flex-wrap items-center gap-5">
+                        {originalPhoto && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPendingPhoto(originalPhoto)
+                            }
+                            className="text-sm font-semibold text-[#c9fa67] hover:underline"
+                          >
+                            Crop / zoom again
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={handleRemovePhoto}
+                          className="text-sm font-semibold text-[#c9fa67] hover:underline"
+                        >
+                          Remove photo
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1502,9 +1459,7 @@ function App() {
                 <label className="block text-sm sm:col-span-2">
                   <span className="mb-2 block font-medium">
                     Location{' '}
-                    <span className="text-[#c9fa67]">
-                      *
-                    </span>
+                    <span className="text-[#c9fa67]">*</span>
                   </span>
 
                   <input
@@ -1515,7 +1470,7 @@ function App() {
                       updateForm('location', event.target.value)
                     }
                     placeholder="e.g. Kandy, near the town centre"
-                    className="w-full rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 outline-none transition placeholder:text-white/25 focus:border-[#c9fa67]/60"
+                    className={fieldClass}
                   />
                 </label>
 
@@ -1523,9 +1478,7 @@ function App() {
                 <label className="block text-sm sm:col-span-2">
                   <span className="mb-2 block font-medium">
                     Description{' '}
-                    <span className="text-[#c9fa67]">
-                      *
-                    </span>
+                    <span className="text-[#c9fa67]">*</span>
                   </span>
 
                   <textarea
@@ -1541,7 +1494,7 @@ function App() {
                       )
                     }
                     placeholder="Describe the pet, when it went missing or where it was found, and any identifying details..."
-                    className="w-full resize-y rounded-xl border border-white/10 bg-[#0c0e0d] px-4 py-3.5 leading-6 outline-none placeholder:text-white/25 focus:border-[#c9fa67]/60"
+                    className={`${fieldClass} resize-y leading-6`}
                   />
 
                   <span className="mt-2 block text-right text-xs text-white/35">
@@ -1550,7 +1503,6 @@ function App() {
                 </label>
               </div>
 
-              {/* Submit */}
               <button
                 type="submit"
                 disabled={submitting || authLoading}
@@ -1560,7 +1512,7 @@ function App() {
                   'Submitting report...'
                 ) : (
                   <>
-                    Submit report
+                    <span>Submit report</span>
                     <ArrowRight size={18} />
                   </>
                 )}
@@ -1574,16 +1526,12 @@ function App() {
           </div>
         </section>
 
-        {/* ======================================
-            ABOUT SECTION
-        ====================================== */}
-
+        {/* About */}
         <section
           id="about"
           className="scroll-mt-24 border-t border-white/10 py-14"
         >
           <div className="mx-auto flex max-w-7xl flex-col justify-between gap-6 px-5 sm:px-8 md:flex-row md:items-center">
-
             <div className="flex items-center gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#c9fa67] text-black">
                 <PawPrint size={22} />
@@ -1596,7 +1544,6 @@ function App() {
                     TRACE
                   </span>
                 </p>
-
                 <p className="mt-1 text-xs text-white/40">
                   Helping paws find their way home.
                 </p>
@@ -1612,17 +1559,25 @@ function App() {
         </section>
       </main>
 
-      {/* Footer */}
       <footer className="border-t border-white/10 px-5 py-6 text-center text-xs text-white/35">
         © {new Date().getFullYear()} PAWTRACE.
         Built with care for every paw.
       </footer>
 
-      {/* Login and Sign Up */}
+      {/* Authentication modal */}
       {authOpen && (
         <AuthPage
           onClose={() => setAuthOpen(false)}
           onAuthenticated={handleAuthenticated}
+        />
+      )}
+
+      {/* Photo Crop & Zoom modal */}
+      {pendingPhoto && (
+        <PetPhotoCropper
+          file={pendingPhoto}
+          onSave={handleCropSaved}
+          onCancel={handleCropCancelled}
         />
       )}
     </div>
