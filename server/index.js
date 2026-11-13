@@ -604,6 +604,177 @@ app.delete(
   }
 );
 
+ // ============================================
+ // REPLACE MY PET REPORT PHOTO
+ // ============================================
+
+app.patch(
+  '/api/reports/:id/photo',
+  requireAuth,
+
+  // Check ownership before uploading a file
+  async (req, res, next) => {
+    const { id } = req.params;
+
+    if (!isValidReportId(id)) {
+      return res.status(400).json({
+        error: 'Invalid pet report ID.',
+      });
+    }
+
+    try {
+      const ownerCheck = await pool.query(
+        `SELECT 1
+         FROM pet_reports
+         WHERE id = $1::bigint
+           AND user_id = $2`,
+        [id, req.session.userId]
+      );
+
+      if (ownerCheck.rows.length === 0) {
+        return res.status(404).json({
+          error: 'Report not found or not accessible.',
+        });
+      }
+
+      next();
+    } catch (error) {
+      console.error('Photo ownership check failed:', error);
+
+      return res.status(500).json({
+        error: 'Unable to verify report ownership.',
+      });
+    }
+  },
+
+  // Upload the new photo
+  (req, res, next) => {
+    uploadPetPhoto(req, res, (error) => {
+      if (error) {
+        return res.status(400).json({
+          error:
+            error.code === 'LIMIT_FILE_SIZE'
+              ? 'The photo must be 5 MB or smaller.'
+              : error.message || 'Invalid photo upload.',
+        });
+      }
+
+      next();
+    });
+  },
+
+  // Replace the stored photo
+  async (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({
+        error: 'Please select a photo to upload.',
+      });
+    }
+
+    const { id } = req.params;
+    let client;
+    let transactionStarted = false;
+
+    try {
+      client = await pool.connect();
+
+      await client.query('BEGIN');
+      transactionStarted = true;
+
+      // Lock the report to prevent overlapping updates
+      const previous = await client.query(
+        `SELECT image_url
+         FROM pet_reports
+         WHERE id = $1::bigint
+           AND user_id = $2
+         FOR UPDATE`,
+        [id, req.session.userId]
+      );
+
+      if (previous.rows.length === 0) {
+        await client.query('ROLLBACK');
+        transactionStarted = false;
+
+        await removeUploadedFile(req);
+
+        return res.status(404).json({
+          error: 'Report not found or not accessible.',
+        });
+      }
+
+      const oldImageUrl = previous.rows[0].image_url;
+      const newImageUrl = `/uploads/${req.file.filename}`;
+
+      const result = await client.query(
+        `UPDATE pet_reports
+         SET image_url = $1
+         WHERE id = $2::bigint
+           AND user_id = $3
+         RETURNING *`,
+        [newImageUrl, id, req.session.userId]
+      );
+
+      await client.query('COMMIT');
+      transactionStarted = false;
+
+      // Only delete old photos stored in our uploads folder.
+      // External image URLs must never be used as file paths.
+      if (typeof oldImageUrl === 'string') {
+        const match = oldImageUrl.match(
+          /^\/uploads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpg|jpeg|png|webp))$/i
+        );
+
+        if (match) {
+          const oldPhotoPath = path.join(
+            currentDirectory,
+            'uploads',
+            match[1]
+          );
+
+          try {
+            await unlink(oldPhotoPath);
+          } catch (fileError) {
+            if (fileError.code !== 'ENOENT') {
+              console.error(
+                'Failed to remove old pet photo:',
+                fileError
+              );
+            }
+          }
+        }
+      }
+
+      return res.status(200).json({
+        message: 'Pet photo updated successfully.',
+        report: result.rows[0],
+      });
+    } catch (error) {
+      if (transactionStarted && client) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackError) {
+          console.error(
+            'Photo update rollback failed:',
+            rollbackError
+          );
+        }
+      }
+
+      await removeUploadedFile(req);
+
+      console.error('Photo replacement failed:', error);
+
+      return res.status(500).json({
+        error: 'Unable to replace the pet photo.',
+      });
+    } finally {
+      if (client) {
+        client.release();
+      }
+    }
+  }
+);
+
 // ============================================
 // START SERVER
 // ============================================
