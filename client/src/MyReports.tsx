@@ -16,6 +16,8 @@ import {
     Trash2,
     X,
 } from 'lucide-react'
+import { ImagePlus } from 'lucide-react'
+import PetPhotoCropper from './PetPhotoCropper'
 
 type MyReport = {
     id: number | string
@@ -112,6 +114,15 @@ export default function MyReports({
 
     const [deleting, setDeleting] = useState(false)
     const [deleteError, setDeleteError] = useState('')
+
+    const [photoEditor, setPhotoEditor] = useState<{
+        reportId: string
+        file: File
+    } | null>(null)
+
+    const [uploadingPhoto, setUploadingPhoto] = useState(false)
+    const [photoError, setPhotoError] = useState('')
+
 
     // ========================================
     // LOAD USER'S REPORTS
@@ -353,6 +364,104 @@ export default function MyReports({
     }
 
     // ========================================
+    // CHANGE REPORT PHOTO
+    // ========================================
+
+    function handlePhotoSelection(
+        report: MyReport,
+        file: File | undefined
+    ) {
+        if (!file || uploadingPhoto) return
+
+        setPhotoError('')
+        setNotice('')
+
+        const allowedTypes = [
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+        ]
+
+        if (!allowedTypes.includes(file.type)) {
+            setPhotoError('Choose a JPG, PNG, or WebP image.')
+            return
+        }
+
+        if (file.size > 5 * 1024 * 1024) {
+            setPhotoError('The photo must be 5 MB or smaller.')
+            return
+        }
+
+        setPhotoEditor({
+            reportId: String(report.id),
+            file,
+        })
+    }
+
+    async function handlePhotoSaved(file: File) {
+        if (!photoEditor || uploadingPhoto) return
+
+        const reportId = photoEditor.reportId
+
+        setPhotoEditor(null)
+        setUploadingPhoto(true)
+        setPhotoError('')
+
+        try {
+            const formData = new FormData()
+            formData.append('image', file)
+
+            const response = await fetch(
+                `${REPORTS_URL}/${encodeURIComponent(reportId)}/photo`,
+                {
+                    method: 'PATCH',
+                    credentials: 'include',
+                    body: formData,
+                }
+            )
+
+            if (!response.ok) {
+                throw new Error(
+                    await readError(
+                        response,
+                        response.status === 401
+                            ? 'Your session has expired. Please log in again.'
+                            : 'Unable to replace the photo.'
+                    )
+                )
+            }
+
+            const data: {
+                message: string
+                report: MyReport
+            } = await response.json()
+
+            if (!data.report) {
+                throw new Error('Invalid response from the server.')
+            }
+
+            // Refresh the photo immediately
+            setReports((previous) =>
+                previous.map((report) =>
+                    String(report.id) === reportId
+                        ? data.report
+                        : report
+                )
+            )
+
+            setNotice('Pet photo updated successfully!')
+        } catch (error) {
+            setPhotoError(
+                error instanceof Error
+                    ? error.message
+                    : 'Failed to update the photo.'
+            )
+        } finally {
+            setUploadingPhoto(false)
+        }
+    }
+
+    // ========================================
     // REPORT STATISTICS
     // ========================================
 
@@ -568,8 +677,8 @@ export default function MyReports({
 
                                             <span
                                                 className={`absolute left-4 top-4 rounded-full px-3 py-2 text-xs font-bold ${report.status === 'Lost'
-                                                        ? 'bg-red-500 text-white'
-                                                        : 'bg-[#c9fa67] text-black'
+                                                    ? 'bg-red-500 text-white'
+                                                    : 'bg-[#c9fa67] text-black'
                                                     }`}
                                             >
                                                 {report.status.toUpperCase()}
@@ -650,11 +759,65 @@ export default function MyReports({
                                                     <Trash2 size={16} />
                                                     Delete
                                                 </button>
+
+                                                <label
+                                                    className={`col-span-2 flex items-center justify-center gap-2 rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-white/80 transition hover:border-[#c9fa67] hover:text-[#c9fa67] ${uploadingPhoto
+                                                        ? 'cursor-not-allowed opacity-50'
+                                                        : 'cursor-pointer'
+                                                        }`}
+                                                >
+                                                    <ImagePlus size={17} />
+                                                    Change photo
+
+                                                    <input
+                                                        type="file"
+                                                        accept="image/jpeg,image/png,image/webp"
+                                                        disabled={uploadingPhoto}
+                                                        className="sr-only"
+                                                        onChange={(event) => {
+                                                            handlePhotoSelection(
+                                                                report,
+                                                                event.target.files?.[0]
+                                                            )
+
+                                                            event.target.value = ''
+                                                        }}
+                                                    />
+                                                </label>
+
+                                                {uploadingPhoto && (
+                                                    <p
+                                                        role="status"
+                                                        className="mt-5 rounded-xl border border-[#c9fa67]/20 bg-[#c9fa67]/5 p-4 text-sm text-[#c9fa67]"
+                                                    >
+                                                        Uploading your new pet photo...
+                                                    </p>
+                                                )}
+
+                                                {photoError && (
+                                                    <p
+                                                        role="alert"
+                                                        className="mt-5 rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-300"
+                                                    >
+                                                        {photoError}
+                                                    </p>
+                                                )}
                                             </div>
                                         </div>
                                     </article>
                                 )
                             })}
+
+                            {/* Change Photo - Crop & Zoom */}
+                            {photoEditor && (
+                                <PetPhotoCropper
+                                    file={photoEditor.file}
+                                    onSave={(file) => {
+                                        void handlePhotoSaved(file)
+                                    }}
+                                    onCancel={() => setPhotoEditor(null)}
+                                />
+                            )}
                         </div>
                     )}
                 </section>
