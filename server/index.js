@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import pool from './db.js';
 import { uploadPetPhoto } from './upload.js';
 import authRoutes from './routes/auth.js';
+import sightingsRoutes from './routes/sightings.js';
 
 dotenv.config();
 
@@ -78,6 +79,7 @@ app.use(
 
 // Register, login, current user and logout
 app.use('/api/auth', authRoutes);
+app.use('/api', sightingsRoutes);
 
 // ============================================
 // UPLOADED PHOTOS

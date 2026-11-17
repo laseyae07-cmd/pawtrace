@@ -6,6 +6,7 @@ import {
     PawPrint,
     ShieldCheck,
 } from 'lucide-react'
+import ReportSightingModal from './ReportSightingModal'
 
 type Report = {
     id: string
@@ -33,6 +34,8 @@ export default function PetDetails({
 }: PetDetailsProps) {
     const [report, setReport] = useState<Report | null>(null)
     const [error, setError] = useState('')
+    const [showSightingForm, setShowSightingForm] = useState(false)
+    const [sightingNotice, setSightingNotice] = useState('')
 
     useLayoutEffect(() => {
         window.scrollTo(0, 0)
@@ -109,6 +112,16 @@ export default function PetDetails({
             </header>
 
             <main className="mx-auto max-w-7xl px-5 py-10 sm:px-8 sm:py-16">
+
+                {sightingNotice && (
+                    <div
+                        role="status"
+                        className="mb-6 rounded-xl border border-[#c9fa67]/25 bg-[#c9fa67]/10 p-4 text-sm text-[#c9fa67]"
+                    >
+                        {sightingNotice}
+                    </div>
+                )}
+
                 {error ? (
                     <div
                         role="alert"
@@ -249,6 +262,32 @@ export default function PetDetails({
                                     </p>
                                 </div>
 
+                                {report.status === 'Lost' && (
+                                    <div className="rounded-3xl border border-[#c9fa67]/25 bg-[#c9fa67]/5 p-6 sm:p-8">
+                                        <h3 className="text-xl font-black">
+                                            Have you seen {report.name}?
+                                        </h3>
+
+                                        <p className="mt-3 text-sm leading-7 text-white/60">
+                                            If you've spotted this pet, share where and when you saw
+                                            them. Your sighting could help bring them home.
+                                        </p>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowSightingForm(true)}
+                                            className="mt-6 rounded-xl bg-[#c9fa67] px-6 py-3 font-bold text-black transition hover:bg-[#d9ff92]"
+                                        >
+                                            Report a Sighting
+                                        </button>
+
+                                        <p className="mt-3 text-xs text-white/40">
+                                            You must be logged in to submit a sighting.
+                                        </p>
+                                    </div>
+                                )}
+
+
                                 <div className="flex items-start gap-3 rounded-2xl border border-[#c9fa67]/20 bg-[#c9fa67]/5 p-5">
                                     <ShieldCheck
                                         size={21}
@@ -274,6 +313,21 @@ export default function PetDetails({
                     </>
                 )}
             </main>
+
+            {showSightingForm && report && (
+                <ReportSightingModal
+                    reportId={report.id}
+                    petName={report.name}
+                    onClose={() => setShowSightingForm(false)}
+                    onSubmitted={() => {
+                        setShowSightingForm(false)
+                        setSightingNotice(
+                            'Your sighting has been submitted successfully!'
+                        )
+                    }}
+                />
+            )}
+
         </div>
     )
 }
