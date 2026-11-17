@@ -26,7 +26,7 @@ type PetDetailsProps = {
     onBack: () => void
 }
 
-const API_BASE_URL = 'http://localhost:5000'
+const API_BASE_URL = import.meta.env.DEV ? 'http://localhost:5000' : window.location.origin
 
 export default function PetDetails({
     reportId,

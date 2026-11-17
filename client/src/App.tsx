@@ -61,7 +61,7 @@ type ReportForm = {
   description: string
 }
 
-const API_BASE_URL = 'http://localhost:5000'
+const API_BASE_URL = import.meta.env.DEV ? 'http://localhost:5000' : window.location.origin
 const API_URL = `${API_BASE_URL}/api/reports`
 const AUTH_URL = `${API_BASE_URL}/api/auth`
 const PHOTO_UPLOAD_URL = `${API_URL}/with-photo`
