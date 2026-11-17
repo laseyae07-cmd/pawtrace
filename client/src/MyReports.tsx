@@ -31,6 +31,7 @@ type MyReport = {
     description: string
     image_url: string | null
     created_at: string
+    reunited_at: string | null
 }
 
 type EditForm = {
@@ -98,6 +99,8 @@ export default function MyReports({
     const [error, setError] = useState('')
     const [notice, setNotice] = useState('')
     const [refreshKey, setRefreshKey] = useState(0)
+    const [reunitingId, setReunitingId] = useState<string | null>(null)
+    const [reunionError, setReunionError] = useState('')
 
     // Edit dialog
     const [editingReport, setEditingReport] =
@@ -462,6 +465,57 @@ export default function MyReports({
         }
     }
 
+    async function handleMarkReunited(report: MyReport) {
+        if (reunitingId) return
+
+        const confirmed = window.confirm(
+            `Has ${report.name} been safely reunited with their family?`
+        )
+
+        if (!confirmed) return
+
+        setReunitingId(String(report.id))
+        setReunionError('')
+
+        try {
+            const response = await fetch(
+                `${REPORTS_URL}/${encodeURIComponent(
+                    String(report.id)
+                )}/reunited`,
+                {
+                    method: 'PATCH',
+                    credentials: 'include',
+                }
+            )
+
+            if (!response.ok) {
+                throw new Error(
+                    await readError(response, 'Unable to mark pet as reunited.')
+                )
+            }
+
+            const data: { report: MyReport } = await response.json()
+
+            setReports((previous) =>
+                previous.map((item) =>
+                    String(item.id) === String(report.id)
+                        ? data.report
+                        : item
+                )
+            )
+
+            setNotice(`${report.name} has been marked as reunited!`)
+        } catch (error) {
+            setReunionError(
+                error instanceof Error
+                    ? error.message
+                    : 'Failed to update reunion status.'
+            )
+        } finally {
+            setReunitingId(null)
+        }
+    }
+
     // ========================================
     // REPORT STATISTICS
     // ========================================
@@ -535,6 +589,12 @@ export default function MyReports({
                     </button>
                 </div>
 
+                {reunionError && (
+                    <p role="alert" className="mt-5 text-sm text-red-300">
+                        {reunionError}
+                    </p>
+                )}
+
                 {/* Success message */}
                 {notice && (
                     <div
@@ -545,7 +605,7 @@ export default function MyReports({
                         {notice}
                     </div>
                 )}
-                
+
                 {/* Private pet sighting notifications */}
                 <SightingsInbox />
 
@@ -685,7 +745,9 @@ export default function MyReports({
                                                     : 'bg-[#c9fa67] text-black'
                                                     }`}
                                             >
-                                                {report.status.toUpperCase()}
+                                                {report.reunited_at
+                                                    ? 'REUNITED'
+                                                    : report.status.toUpperCase()}
                                             </span>
                                         </div>
 
@@ -805,6 +867,19 @@ export default function MyReports({
                                                     >
                                                         {photoError}
                                                     </p>
+                                                )}
+
+                                                {report.status === 'Lost' && !report.reunited_at && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void handleMarkReunited(report)}
+                                                        disabled={reunitingId !== null}
+                                                        className="col-span-2 rounded-xl bg-[#c9fa67] px-4 py-3 text-sm font-bold text-black disabled:opacity-50"
+                                                    >
+                                                        {reunitingId === String(report.id)
+                                                            ? 'Updating...'
+                                                            : 'Mark as Reunited'}
+                                                    </button>
                                                 )}
                                             </div>
                                         </div>

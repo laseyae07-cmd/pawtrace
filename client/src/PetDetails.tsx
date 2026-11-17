@@ -19,6 +19,7 @@ type Report = {
     description: string
     image_url: string | null
     created_at: string
+    reunited_at: string | null
 }
 
 type PetDetailsProps = {
@@ -163,7 +164,9 @@ export default function PetDetails({
                                         : 'bg-[#c9fa67]/15 text-[#c9fa67]'
                                         }`}
                                 >
-                                    {report.status.toUpperCase()} PET
+                                    {report.reunited_at
+                                        ? 'REUNITED'
+                                        : `${report.status.toUpperCase()} PET`}
                                 </span>
                             </div>
 
@@ -262,7 +265,7 @@ export default function PetDetails({
                                     </p>
                                 </div>
 
-                                {report.status === 'Lost' && (
+                                {report.status === 'Lost' && !report.reunited_at && (
                                     <div className="rounded-3xl border border-[#c9fa67]/25 bg-[#c9fa67]/5 p-6 sm:p-8">
                                         <h3 className="text-xl font-black">
                                             Have you seen {report.name}?

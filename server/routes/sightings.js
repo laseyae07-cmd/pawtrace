@@ -124,6 +124,7 @@ router.post(
          FROM pet_reports AS p
          WHERE p.id = $1::bigint
            AND p.status = 'Lost'
+           AND p.reunited_at IS NULL
            AND p.user_id IS NOT NULL
            AND p.user_id <> $2::bigint
          RETURNING

@@ -36,6 +36,7 @@ type Pet = {
   color: string
   image: string
   description: string
+  reunitedAt: string | null
 }
 
 type DatabaseReport = {
@@ -49,6 +50,7 @@ type DatabaseReport = {
   image_url: string | null
   description: string
   created_at: string
+  reunited_at: string | null
 }
 
 type ReportForm = {
@@ -110,6 +112,7 @@ function formatReport(report: DatabaseReport): Pet {
     location: report.location,
     date: new Date(report.created_at).toLocaleDateString(),
     status: report.status,
+    reunitedAt: report.reunited_at,
     color: report.color ?? '',
     image,
     description: report.description,
@@ -1161,9 +1164,11 @@ function App() {
                             : 'bg-[#c9fa67] text-black'
                             }`}
                         >
-                          {pet.status === 'Lost'
-                            ? 'LOST PET'
-                            : 'FOUND PET'}
+                          {pet.reunitedAt
+                            ? 'REUNITED'
+                            : pet.status === 'Lost'
+                              ? 'LOST PET'
+                              : 'FOUND PET'}
                         </span>
 
                         <button

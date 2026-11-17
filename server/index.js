@@ -606,9 +606,9 @@ app.delete(
   }
 );
 
- // ============================================
- // REPLACE MY PET REPORT PHOTO
- // ============================================
+// ============================================
+// REPLACE MY PET REPORT PHOTO
+// ============================================
 
 app.patch(
   '/api/reports/:id/photo',
@@ -773,6 +773,55 @@ app.patch(
       if (client) {
         client.release();
       }
+    }
+  }
+);
+
+// ============================================
+// MARK LOST PET AS REUNITED
+// ============================================
+
+app.patch(
+  '/api/reports/:id/reunited',
+  requireAuth,
+  async (req, res) => {
+    const { id } = req.params;
+
+    if (!isValidReportId(id)) {
+      return res.status(400).json({
+        error: 'Invalid pet report ID.',
+      });
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE pet_reports
+         SET reunited_at = NOW()
+         WHERE id = $1::bigint
+           AND user_id = $2
+           AND status = 'Lost'
+           AND reunited_at IS NULL
+         RETURNING *`,
+        [id, req.session.userId]
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          error:
+            'Active lost-pet report not found or not accessible.',
+        });
+      }
+
+      return res.json({
+        message: 'Pet marked as reunited!',
+        report: result.rows[0],
+      });
+    } catch (error) {
+      console.error('Reunion update failed:', error);
+
+      return res.status(500).json({
+        error: 'Unable to update reunion status.',
+      });
     }
   }
 );
