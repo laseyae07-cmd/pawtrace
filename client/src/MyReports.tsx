@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { ImagePlus } from 'lucide-react'
 import PetPhotoCropper from './PetPhotoCropper'
+import SightingsInbox from './SightingsInbox'
 
 type MyReport = {
     id: number | string
@@ -544,6 +545,9 @@ export default function MyReports({
                         {notice}
                     </div>
                 )}
+                
+                {/* Private pet sighting notifications */}
+                <SightingsInbox />
 
                 {/* Statistics */}
                 <div className="mt-10 grid grid-cols-3 gap-3 sm:gap-5">

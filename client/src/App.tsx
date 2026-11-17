@@ -23,6 +23,7 @@ import type { AuthUser } from './AuthPage'
 import MyReports from './MyReports'
 import PetDetails from './PetDetails'
 import PetPhotoCropper from './PetPhotoCropper'
+import { Bell } from 'lucide-react'
 
 type Pet = {
   id: number
@@ -158,6 +159,8 @@ function App() {
 
   // Dashboard and Pet Details navigation
   const [showMyReports, setShowMyReports] = useState(false)
+  const [unreadSightings, setUnreadSightings] = useState<number | null>(null)
+  const [notificationRefreshKey, setNotificationRefreshKey] = useState(0)
 
   const [selectedReportId, setSelectedReportId] = useState<
     string | null
@@ -264,6 +267,67 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!currentUser) return
+
+    const controller = new AbortController()
+
+    async function loadUnreadSightings() {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/sightings/mine`,
+          {
+            credentials: 'include',
+            signal: controller.signal,
+          }
+        )
+
+        if (!response.ok) {
+          throw new Error('Unable to load sighting notifications.')
+        }
+
+        const data: Array<{ is_read: boolean }> =
+          await response.json()
+
+        if (!Array.isArray(data)) {
+          throw new Error('Invalid notifications response.')
+        }
+
+        if (!controller.signal.aborted) {
+          const unreadCount = data.filter(
+            (sighting) => sighting.is_read === false
+          ).length
+
+          setUnreadSightings(unreadCount)
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error('Notification loading failed:', error)
+          setUnreadSightings(null)
+        }
+      }
+    }
+
+    void loadUnreadSightings()
+
+    // Refresh automatically every 30 seconds.
+    const interval = window.setInterval(() => {
+      void loadUnreadSightings()
+    }, 30000)
+
+    function handleWindowFocus() {
+      void loadUnreadSightings()
+    }
+
+    window.addEventListener('focus', handleWindowFocus)
+
+    return () => {
+      controller.abort()
+      window.clearInterval(interval)
+      window.removeEventListener('focus', handleWindowFocus)
+    }
+  }, [currentUser, notificationRefreshKey])
+
   // Filter the community board
   const filteredPets = useMemo(() => {
     const searchTerm = query.trim().toLowerCase()
@@ -339,6 +403,7 @@ function App() {
       }
 
       setCurrentUser(null)
+      setUnreadSightings(null)
       setShowMyReports(false)
       setAuthOpen(false)
       setMobileMenuOpen(false)
@@ -368,6 +433,7 @@ function App() {
   function returnToHomepage() {
     setShowMyReports(false)
     setReportsVersion((version) => version + 1)
+    setNotificationRefreshKey((value) => value + 1)
     window.scrollTo(0, 0)
   }
 
@@ -649,6 +715,29 @@ function App() {
                 <button
                   type="button"
                   onClick={openMyReports}
+                  title="Sighting notifications"
+                  aria-label={
+                    unreadSightings === null
+                      ? 'Open sighting notifications'
+                      : `Open sighting notifications, ${unreadSightings} unread`
+                  }
+                  className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/15 text-white/75 transition hover:border-[#c9fa67] hover:text-[#c9fa67]"
+                >
+                  <Bell size={20} />
+
+                  {unreadSightings !== null && unreadSightings > 0 && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white"
+                    >
+                      {unreadSightings > 99 ? '99+' : unreadSightings}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={openMyReports}
                   className="rounded-full border border-white/15 px-4 py-3 text-sm font-semibold text-white/75 transition hover:border-[#c9fa67] hover:text-[#c9fa67]"
                 >
                   My Reports
@@ -738,6 +827,21 @@ function App() {
                       />
                       {currentUser.full_name}
                     </p>
+
+                    <button
+                      type="button"
+                      onClick={openMyReports}
+                      className="flex items-center gap-3 text-left font-semibold text-[#c9fa67]"
+                    >
+                      <Bell size={19} />
+                      Notifications
+
+                      {unreadSightings !== null && unreadSightings > 0 && (
+                        <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white">
+                          {unreadSightings > 99 ? '99+' : unreadSightings}
+                        </span>
+                      )}
+                    </button>
 
                     <button
                       type="button"
@@ -1053,8 +1157,8 @@ function App() {
 
                         <span
                           className={`absolute left-4 top-4 rounded-full px-3 py-2 text-xs font-bold ${pet.status === 'Lost'
-                              ? 'bg-red-500/90 text-white'
-                              : 'bg-[#c9fa67] text-black'
+                            ? 'bg-red-500/90 text-white'
+                            : 'bg-[#c9fa67] text-black'
                             }`}
                         >
                           {pet.status === 'Lost'
