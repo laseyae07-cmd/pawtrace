@@ -1,0 +1,2 @@
+ALTER TABLE pet_reports
+ADD COLUMN IF NOT EXISTS reunited_at TIMESTAMPTZ;
